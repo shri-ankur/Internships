@@ -1,0 +1,206 @@
+---
+title: "anc_checkups"
+author: "Ankur Shrivastava"
+date: "12 May 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r bl1, echo=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(sqldf)
+library(tidyr)
+
+anm_visit <- read.csv("anm_visit_detail.csv", stringsAsFactors = FALSE, header = TRUE,
+                      na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+str(anm_visit)
+summary(anm_visit)
+
+# The following variables represent categories and not character or integers.
+# Hence they need to be converted to categories
+categorical <- c("anm_visit_detail_breathlessness", "anm_visit_detail_urine",
+                 "anm_visit_detail_abdomen_pain", "anm_visit_detail_edema",
+                 "anm_visit_detail_body_edema", "anm_visit_detail_headache")
+
+#Converting to categorical variables
+
+anm_visit[, categorical] <- lapply(anm_visit[, categorical], as.factor)
+str(anm_visit[, categorical])
+
+#Following are date variables and should be changed to date
+anm_visit$anm_visit_detail_followup_date <- ymd(anm_visit$anm_visit_detail_followup_date)
+
+#Following are datetime variables and should be changed to datetime
+datetimevars <- c("anm_visit_detail_form_start_time", "anm_visit_detail_form_fill_time",
+                  "anm_visit_detail_receive_time")
+
+anm_visit[, datetimevars] <- lapply(anm_visit[, datetimevars], ymd_hms)
+str(anm_visit[, datetimevars])
+
+#Following are numeric variables and should be changed to numeric
+numvars <- c("anm_visit_detail_temp", "anm_visit_detail_gps_lat", "anm_visit_detail_gps_long")
+
+anm_visit[, numvars] <- lapply(anm_visit[, numvars], as.numeric)
+str(anm_visit[, numvars])
+
+pw_case_flag <- read.csv("pw_case_flag.csv", stringsAsFactors = FALSE, header = TRUE,
+                         na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+str(pw_case_flag)
+summary(pw_case_flag)
+
+#Following are date variables and should be changed to date
+pw_case_flag$anm_visit_detail_followup_date <- ymd(pw_case_flag$anm_visit_detail_followup_date)
+pw_case_flag$doc_visit_detail_followup_date <- ymd(pw_case_flag$doc_visit_detail_followup_date)
+
+#Following are datetime variables and should be changed to datetime
+datetimevars <- c("pw_case_flag_set_time", "doc_visit_detail_last_visit_date")
+
+pw_case_flag[, datetimevars] <- lapply(pw_case_flag[, datetimevars], ymd_hms)
+str(pw_case_flag[, datetimevars])
+
+length(unique(pw_case_flag$pw_profile_id))
+#There are 43783 unique pw ids 
+
+#Get all closed cases from pw_case_flag
+pw_closed_id <- sqldf("select distinct(pw_profile_id) from pw_case_flag where pw_case_flag_closed = 1")
+
+nrow(pw_closed_id)
+#There are 11932 closed cases
+```
+```{r bl2, echo=FALSE}
+anm_visit$risk_status <- as.factor(anm_visit$risk_status)
+
+levels(anm_visit$risk_status) <- c("Normal", "Risk", "High Risk")
+
+anm_visit$risk_status <- factor(anm_visit$risk_status, 
+                                levels = c("Normal", "Risk", "High Risk"),
+                                ordered = TRUE)
+
+str(anm_visit$risk_status)
+
+anm_visit$anm_visit_detail_receive_date <- as.Date(anm_visit$anm_visit_detail_receive_time)
+
+#anm visit details of only closed cases
+anm_closed <- sqldf("select * from anm_visit where pw_profile_id in pw_closed_id")
+
+#Number of unique profile ids should be same
+length(unique(anm_closed$pw_profile_id))
+# [1] 11932
+
+#Get the profile ids of women who had 4 or more visits
+pw_4_visits <- anm_closed %>% group_by(pw_profile_id) %>%
+                  arrange(pw_profile_id, desc(anm_visit_detail_receive_date)) %>% 
+                  distinct(pw_profile_id, anm_visit_detail_receive_date, .keep_all = TRUE) %>%
+                  summarise(N = n()) %>%
+                  ungroup() %>% filter(N >= 4) %>%
+                  select(pw_profile_id)
+
+nrow(pw_4_visits)
+#There are 874 unique profiles who had 4 or more visits
+```
+```{r bl3, echo=FALSE}
+#Get all the details of the women who had 4 or more visits
+anm_4_visits <- sqldf("select * from anm_visit where pw_profile_id in pw_4_visits")
+
+#Check for the number of unique pw_profiles
+length(unique(anm_4_visits$pw_profile_id))
+
+#Read in subcenter data
+subcenter <- read.csv("subcenter.csv", stringsAsFactors = FALSE, 
+                      na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+str(subcenter)
+
+user <- read.csv("user.csv", stringsAsFactors = FALSE, 
+                 na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+str(user)
+
+center <- read.csv("center.csv", stringsAsFactors = FALSE, 
+                   na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+str(center)
+
+block <- read.csv("block.csv", stringsAsFactors = FALSE, 
+                  na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+str(block)
+
+#Merge user data with anm_4_visits data
+anm_4_visits <- merge(anm_4_visits, user, by = "user_id", all.x = TRUE)
+
+#Merge subcenter data with anm_4_visits data
+anm_4_visits <- merge(anm_4_visits, subcenter, by = "subcenter_id", all.x = TRUE)
+
+#Merge center data with anm_4_visits data
+anm_4_visits <- merge(anm_4_visits, center, by.x = "center_id.x", by.y = "center_id",
+                      all.x = TRUE)
+
+#Merge block data with anm_4_visits data
+anm_4_visits <- merge(anm_4_visits, block, by.x = "block_id.x", by.y = "block_id",
+                      all.x = TRUE)
+
+
+pw_profile <- read.csv("pw_profile.csv", stringsAsFactors = FALSE, encoding = "utf-8",
+                       na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+
+#Merge pw_profile data with anm_4_visits data
+anm_4_visits <- merge(anm_4_visits, pw_profile, by = "pw_profile_id", all.x = TRUE)
+
+
+anm_4_visits <- anm_4_visits %>% group_by(pw_profile_id) %>%
+                arrange(pw_profile_id, desc(anm_visit_detail_receive_date)) %>% 
+                distinct(pw_profile_id, anm_visit_detail_receive_date, .keep_all = TRUE) %>%
+                ungroup()
+
+write.csv(anm_4_visits, "anm_4_visits.csv", row.names = FALSE)
+
+#Create a subset of anm_4_visits
+anm_4_visits_sub <- anm_4_visits %>%
+                    select(pw_profile_id, pw_profile_name, subcenter_id.x, subcenter_name,
+                           center_id.x, center_name, block_id.x, block_name, risk_status, system_risk_reason, anm_visit_detail_receive_date)
+```
+```{r bl4, echo=FALSE}
+
+pw_4_visits_vect <- as.vector(pw_4_visits$pw_profile_id)
+
+for(i in seq_len(length(pw_4_visits_vect))){
+
+curr_pw_profile = pw_4_visits_vect[i]
+
+test_profile <- anm_4_visits_sub %>% filter(anm_4_visits_sub$pw_profile_id == curr_pw_profile) %>%
+                arrange(anm_visit_detail_receive_date)
+
+test_profile$risk_num <- seq(1:nrow(test_profile))
+
+test_profile$risk_num <- paste0("Risk Status", test_profile$risk_num)
+
+# labels and breaks for X axis text
+lbls <- paste(day(test_profile$anm_visit_detail_receive_date),
+              month.abb[month(test_profile$anm_visit_detail_receive_date)],
+              lubridate::year(test_profile$anm_visit_detail_receive_date))
+brks <- test_profile$anm_visit_detail_receive_date             
+
+
+plot <- ggplot(test_profile, aes(x = anm_visit_detail_receive_date, y = risk_status, fill = risk_num)) +
+  geom_bar(stat = "identity") +
+  ylim("Normal", "Risk", "High Risk") +
+  geom_text(stat = "identity", aes(label = system_risk_reason), angle = 90, position = position_dodge(0.9),vjust = -0.2) +
+  scale_x_date(labels = lbls, breaks = brks) +  # change to monthly ticks and labels
+  theme(axis.text.x = element_text(angle = 45, vjust=0.5),  # rotate x axis text
+        panel.grid.minor = element_blank()) + # turn off minor grid
+  xlab("Visit Date") + ylab("Risk Status") +
+  ggtitle(paste(test_profile$pw_profile_name, "at subcenter", test_profile$subcenter_name,
+                ", center", test_profile$center_name, ", block", test_profile$block_name))
+
+print(plot)
+
+}
+
+```
