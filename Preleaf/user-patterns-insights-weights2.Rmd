@@ -1,0 +1,220 @@
+---
+title: "User-patterns-Insights (Weights)"
+author: "Ankur Shrivastava"
+date: "25 April 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+
+```{r setup, include=FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+```{r bl1, echo=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(plotly)
+library(ggforce)
+library(sqldf)
+library(tidyr)
+
+block3 <- read.csv("users_pw_anm_block3.csv", stringsAsFactors = FALSE, 
+                   na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+str(block3)
+
+subcenter <- read.csv("subcenter.csv", stringsAsFactors = FALSE, 
+                      na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+str(subcenter)
+
+block3 <- merge(block3, subcenter, by = "subcenter_id", all.x = TRUE)
+
+block3$user_id <- as.numeric(block3$user_id)
+```
+```{r bl2, echo=TRUE}
+#Following variables represent categories and not character or intgers
+categorical <- c("user_type", "user_sex", "user_acc_status", "pw_profile_bpl_card", "pw_profile_edu", "pw_profile_type_uid",
+                 "pw_profile_first_preg", "pw_profile_birth_order", "pw_profile_prev_pih",
+                 "pw_profile_prev_sb", "pw_profile_prev_low_wt", "pw_profile_prev_miscarriage",
+                 "pw_profile_prev_c_section", "pw_profile_prev_pph", "pw_profile_heart_disease",
+                 "pw_profile_thyroid_disease", "pw_profile_epilepsy", "pw_profile_reproductive_surg",
+                 "pw_profile_other_flag", "pw_profile_family_diabetes", "pw_profile_family_pih",
+                 "pw_profile_multi_preg", "pw_profile_blood_group", "pw_profile_hiv")
+
+#Converting to categorical variables
+block3[, categorical] <- lapply(block3[, categorical], as.factor)
+str(block3[, categorical])
+
+#Following are date variables and should be changed to date
+datevars <- c("pw_profile_lmp", "pw_profile_edd")
+
+block3[, datevars] <- lapply(block3[, datevars], ymd)
+
+str(block3[, datevars])
+
+block3$pw_profile_dob <- dmy(block3$pw_profile_dob)
+
+#Following are datetime variables and should be changed to datetime
+datetimevars <- c("registeration_date", "last_login_time", "pw_profile_form_start_time", "pw_profile_form_fill_time",
+                  "pw_profile_reg_date")
+
+block3[, datetimevars] <- lapply(block3[, datetimevars], ymd_hms)
+str(block3[, datetimevars])
+```
+```{r bl3,echo=TRUE}
+#Reading case closed files
+pw_case_flag <- read.csv("pw_case_flag_05_apr.csv", stringsAsFactors = FALSE, header = TRUE,
+                         na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+#Select profiles whose cases are closed 
+pw_closed <- sqldf("select distinct(pw_profile_id) from pw_case_flag where pw_case_flag_closed = 1")
+
+#Removing closed profiles from block3
+block3_1 <- sqldf("select * from block3 where pw_profile_id not in pw_closed")
+
+#Removing user ids less than 10
+block3_1 <- block3_1[(which(block3_1$user_id > 10)),]
+
+agg_user <- block3_1 %>% group_by(subcenter_id, subcenter_name)
+
+```
+```{r bl4,echo=TRUE}
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+max_occur <- function(v){
+  uniqv <- unique(v)
+  max(tabulate(match(v, uniqv)))
+}
+
+#Aggregate and summarise for frequent occurence of same values of weight
+agg_user_weight <- agg_user %>% summarise(weight_sd = sd(anm_visit_detail_weight), N = n(),
+                                          freq_val = getmode(anm_visit_detail_weight),
+                                          no_of_times = max_occur(anm_visit_detail_weight),
+                                          pct_occur = (no_of_times/N) * 100,
+                                          weight_range = max(anm_visit_detail_weight) - min(anm_visit_detail_weight),
+                                          Average_wt = mean(anm_visit_detail_weight)) 
+
+#Users with frequent occurence of same values of weight with at least 10 records
+max_single_value <- agg_user_weight %>% filter(N > 9) %>% arrange(desc(pct_occur))
+
+max_single_value <- ungroup(max_single_value)
+
+#-----Percentage of most frequently occuring value as the criteria-------------
+
+#Top 5 users with high percentage of single value records
+top5 <- top_n(max_single_value, 5, pct_occur)
+
+#Top 5 users/subcenters with most frquent values of weight
+ggplot(top5, aes(x = as.factor(subcenter_name), y = pct_occur, label = freq_val)) +
+  geom_bar(stat = "identity") + 
+  geom_text(position = position_dodge(0.9),vjust = -0.2) +
+  xlab("Subcenter id") + ylab("Percentage of records") +
+  ggtitle(("Subcenters with most frequent values")) 
+
+# Note: 1) Height of the bars denote the percentage of records that contain the
+#         most frequent value.
+# 
+# 2) Label on the top of the bars denote the most frequently occuring value
+#   of weight in that subcenter's records.
+
+#Bubble chart between number of records and most frequently used value
+theme_set(theme_bw())  # pre-set the bw theme.
+g <- ggplot(top5, aes(x = N,  y = pct_occur)) + 
+  ylim(c(0,50)) +
+  xlab("Number of records") + ylab("Percentage of most frequently used value") +
+  labs(title="Most frequently appearing values ",
+       color = "Subcenter", size = "Number of records")
+g + geom_jitter(aes(col= as.factor(subcenter_name), size=N)) 
+
+
+#Note: 1) Percentage of records indicate the Percentage of subcenter records that
+#         contain the most frequently occuring value.
+# 2) Size of the bubble indicates the total number of records in that subcenter.
+
+#Print the data
+print(data.frame(Subcenter = top5$subcenter_name, Most_frequent_value =  top5$freq_val, Percent = round(top5$pct_occur,2),
+                             Number_of_records = top5$N))
+
+#-------------Deviation of weight values around mean as the criteria----------
+#Users with minimum deviation of weight values with at least 10 records
+min_wt_deviation<- agg_user_weight %>% filter(N > 9) %>% arrange(weight_sd)
+
+min_wt_deviation <- ungroup(min_wt_deviation)
+
+#Top 5 users with minimum deviation of weight values with at least 10 records
+top5_sd <- top_n(min_wt_deviation, -5, weight_sd)
+
+#Top 5 with least weight deviations plot
+ggplot(top5_sd, aes(x = as.factor(subcenter_name), y = weight_sd, label = round(Average_wt))) +
+  geom_bar(stat = "identity") + 
+  geom_text(position = position_dodge(0.9),vjust = -0.2) +
+  xlab("Subcenter") + ylab("Deviation of weight values from the mean") +
+  ggtitle(("Subcenters with the least deviations from Mean")) 
+
+#Note: 1) Height of the bars denote the average deviation of weight around mean value
+#         in that subcenter.
+#2) Label on the top of the bars denote the Mean value of weight in that
+# subcenter's records.
+
+
+#Bubble chart between number of records and the least deviations from average weight.
+theme_set(theme_bw())  # pre-set the bw theme.
+g <- ggplot(top5_sd, aes(x = N,  y = weight_sd)) + 
+  ylim(c(0,6)) +
+  xlab("Number of records") + ylab("Deviation of weight from the mean") +
+  labs(title="Weight Deviations from the mean",
+       color = "Subcenter", size = "Number of records")
+g + geom_jitter(aes(col= as.factor(subcenter_name), size=N)) 
+
+#Note: 1) Weight deviations indicate the average deviation in weight around
+#         the mean weight in that subcenter.
+# 2) Size of the bubble indicates the total number of records in that subcenter.
+
+#Print the data for weight deviations
+print(data.frame(Subcenter = top5_sd$subcenter_name, Deviation = round(top5_sd$weight_sd,2),
+                 Average_weight = top5_sd$Average_wt, Number_of_records = top5_sd$N))
+
+#------------Range of values as the criteria--------------------------------
+#Users with minimum weight ranges with at least 10 records
+min_wt_range <- agg_user_weight %>% filter(N > 9) %>% arrange(weight_range)
+
+min_wt_range <- ungroup(min_wt_range)
+
+#Top 5 users with minimum ranges of weight values with at least 10 records
+top5_ranges <- top_n(min_wt_range, -5, weight_range)
+
+#Top 5 with least weight ranges plot
+ggplot(top5_ranges, aes(x = as.factor(subcenter_name), y = weight_range, label = round(weight_range,2))) +
+  geom_bar(stat = "identity") + 
+  geom_text(position = position_dodge(0.9),vjust = -0.2) +
+  xlab("Subcenter id") + ylab("Range of weight values") +
+  ggtitle(("Subcenters with the least ranges")) 
+
+#Note: 1) Height of the bars denote the range of weight values in that subcenter. Range is
+#         obtained by subtracting minimum value from the maximum value in that subcenter.
+#2) Label on the top of the bars denote the range of weight values in that
+# subcenter's records.
+
+#Bubble chart between number of records and the least deviations from average weight.
+theme_set(theme_bw())  # pre-set the bw theme.
+g <- ggplot(top5_ranges, aes(x = N,  y = weight_range)) + 
+  ylim(c(0,22)) +
+  xlab("Number of records") + ylab("Weight Range") +
+  labs(title="Weight ranges at a subcenter",
+       color = "Subcenter", size = "Number of records")
+g + geom_jitter(aes(col= as.factor(subcenter_name), size=N)) 
+
+#Note: 1) Weight ranges indicate the range of weight values in that subcenter. This is
+#         obtained by subtracting minimum weight from the maximum weight.
+# 2) Size of the bubble indicates the total number of records in that subcenter.
+
+#Print the data for weight ranges
+print(data.frame(Subcenter = top5_ranges$subcenter_name, Weight_Range = round(top5_ranges$weight_range,2),
+                 Number_of_records = top5_ranges$N))
+
+```
