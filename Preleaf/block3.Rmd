@@ -1,0 +1,223 @@
+---
+title: "block3"
+author: "Ankur Shrivastava"
+date: "27 March 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Block 3 Data Analysis
+
+```{r pl1}
+
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(plotly)
+library(pander)
+
+block3 <- read.csv("users_pw_anm_block3.csv", stringsAsFactors = FALSE, 
+                   na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+str(block3)
+
+```
+## ----------Data Cleaning and preparation--------------------------------
+
+```{r bl2}
+block3$user_id <- as.numeric(block3$user_id)
+
+#Following variables represent categories and not character or intgers
+categorical <- c("user_type", "user_sex", "user_acc_status", "pw_profile_bpl_card", "pw_profile_edu", "pw_profile_type_uid",
+                 "pw_profile_first_preg", "pw_profile_birth_order", "pw_profile_prev_pih",
+                 "pw_profile_prev_sb", "pw_profile_prev_low_wt", "pw_profile_prev_miscarriage",
+                 "pw_profile_prev_c_section", "pw_profile_prev_pph", "pw_profile_heart_disease",
+                 "pw_profile_thyroid_disease", "pw_profile_epilepsy", "pw_profile_reproductive_surg",
+                 "pw_profile_other_flag", "pw_profile_family_diabetes", "pw_profile_family_pih",
+                 "pw_profile_multi_preg", "pw_profile_blood_group", "pw_profile_hiv")
+
+#Converting to categorical variables
+block3[, categorical] <- lapply(block3[, categorical], as.factor)
+str(block3[, categorical])
+
+```
+
+
+Following are date variables and should be changed to date
+
+```{r bl3}
+datevars <- c("pw_profile_dob", "pw_profile_lmp", "pw_profile_edd")
+
+block3[, datevars] <- lapply(block3[, datevars], ymd)
+
+str(block3[, datevars])
+
+```
+
+```{r bl4}
+#Following are datetime variables and should be changed to datetime
+datetimevars <- c("registeration_date", "last_login_time", "pw_profile_form_start_time", "pw_profile_form_fill_time",
+                  "pw_profile_reg_date")
+
+block3[, datetimevars] <- lapply(block3[, datetimevars], ymd_hms)
+str(block3[, datetimevars])
+```
+
+Line Plot for number of records by each user
+```{r bl5}
+agg_user <- block3 %>% group_by(user_id) %>% tally()
+
+usr_lines <- ggplot(agg_user, aes(x = user_id, y = n)) + 
+                 geom_line() + xlab("User Id") + ylab("Number of Records")
+
+ggplotly(usr_lines)
+```
+Point Plot for number of records by each user
+
+```{r bl6}
+#Aggregate number of records by each user
+usr_points <- ggplot(agg_user, aes(x = user_id, y = n)) + 
+                  geom_point() + xlab("User Id") + ylab("Number of Records")
+
+ggplotly(usr_points)
+```
+Form filling trend
+
+```{r bl6-a}
+block3$anm_visit_detail_form_fill_date <- as.Date(block3$anm_visit_detail_form_fill_time)
+
+#Form filling trend by each user
+agg_user_date <- block3 %>% group_by(user_id, anm_visit_detail_form_fill_date) %>% tally()
+
+agg_user_date <- agg_user_date[!is.na(agg_user_date$anm_visit_detail_form_fill_date),]
+
+usrid <- sort(unique(na.omit(agg_user_date$user_id)))
+
+#Show form filling trend for each of the users
+for(i in usrid){
+  plot <- ggplot(agg_user_date[agg_user_date$user_id == i, ], aes(x = anm_visit_detail_form_fill_date, y = n)) +
+    geom_point() + xlab("Date") + ylab("Number of records") +
+    ggtitle(paste("User id", as.character(i)))
+  print(plot)
+}
+
+```
+Aggregate values
+```{r bl7}
+#Aggregate values by each subcenter
+agg_subcent <- block3 %>% group_by(subcenter_id) 
+
+
+subcent <- sort(unique(na.omit(agg_subcent$subcenter_id)))
+```
+Systolic BP values 
+
+```{r bl8}
+#Show systolic bp values in each of the subcenters
+for(i in subcent){
+ plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x =      pw_profile_id, y = anm_visit_detail_bp_sys)) +
+    geom_point() + xlab("Pw Profile Id") + ylab("Blood Pressure Systolic") +
+    ggtitle(paste("Subcenter", as.character(i)))
+
+# plot <-plot_ly(data = agg_subcent[agg_subcent$subcenter_id == i, ], x = pw_profile_id,y = anm_visit_detail_bp_sys,type='scatter',mode='markers')
+# 
+# #defining labels and titile using layout()
+# layout(plot,title = paste("Subcenter", as.character(i)),
+#        xaxis = list(title = "Pw Profile Id"),
+#        yaxis = list(title = "Blood Pressure Systolic"))
+ print(plot)
+
+}
+
+```
+Diastolic BP values
+
+```{r bl9}
+#Show diastolic bp values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_bp_dia)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("Blood Pressure Diastolic") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+```
+Pulse values
+
+```{r bl10}
+#Show pulse values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_pulse)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("Pulse rate") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+```
+Weight values
+
+```{r bl11}
+#Show weight values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_weight)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("Weight") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+```
+Height values
+```{r bl12}
+#Show height values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_height)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("Height") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+```
+BMI values
+
+```{r bl13}
+#Show bmi values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_bmi)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("BMI") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+```
+Temperature Values
+
+```{r bl14}
+#Show temperature values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_temp)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("Temperature") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+```
+Haemoglobin Count
+
+```{r bl15}
+#Show Haemoglobin count values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_hb)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("Hb count") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+```
+Fetal bpm
+
+```{r bl16}
+#Show Fetal bpm values in each of the subcenters
+for(i in subcent){
+  plot <- ggplot(agg_subcent[agg_subcent$subcenter_id == i, ], aes(x = pw_profile_id, y = anm_visit_detail_fetal_bpm)) + 
+    geom_point() + xlab("Pw Profile Id") + ylab("Fetal bpm") +
+    ggtitle(paste("Subcenter", as.character(i)))
+  print(plot)
+}
+
+#---------------------------------------------------------------------------
+```
