@@ -1,0 +1,255 @@
+---
+title: "block3"
+author: "Ankur Shrivastava"
+date: "06 April 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Block 3 Data Analysis
+
+```{r bl1}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(plotly)
+library(ggforce)
+library(sqldf)
+library(tidyr)
+
+block3 <- read.csv("users_pw_anm_block3.csv", stringsAsFactors = FALSE, 
+                   na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+str(block3)
+
+block3$user_id <- as.numeric(block3$user_id)
+```
+
+```{r bl2}
+#Following variables represent categories and not character or intgers
+categorical <- c("user_type", "user_sex", "user_acc_status", "pw_profile_bpl_card", "pw_profile_edu", "pw_profile_type_uid",
+                 "pw_profile_first_preg", "pw_profile_birth_order", "pw_profile_prev_pih",
+                 "pw_profile_prev_sb", "pw_profile_prev_low_wt", "pw_profile_prev_miscarriage",
+                 "pw_profile_prev_c_section", "pw_profile_prev_pph", "pw_profile_heart_disease",
+                 "pw_profile_thyroid_disease", "pw_profile_epilepsy", "pw_profile_reproductive_surg",
+                 "pw_profile_other_flag", "pw_profile_family_diabetes", "pw_profile_family_pih",
+                 "pw_profile_multi_preg", "pw_profile_blood_group", "pw_profile_hiv")
+
+#Converting to categorical variables
+block3[, categorical] <- lapply(block3[, categorical], as.factor)
+str(block3[, categorical])
+
+#Following are date variables and should be changed to date
+datevars <- c("pw_profile_lmp", "pw_profile_edd")
+
+block3[, datevars] <- lapply(block3[, datevars], ymd)
+
+str(block3[, datevars])
+
+block3$pw_profile_dob <- dmy(block3$pw_profile_dob)
+
+#Following are datetime variables and should be changed to datetime
+datetimevars <- c("registeration_date", "last_login_time", "pw_profile_form_start_time", "pw_profile_form_fill_time",
+                  "pw_profile_reg_date")
+
+block3[, datetimevars] <- lapply(block3[, datetimevars], ymd_hms)
+str(block3[, datetimevars])
+```
+
+``` {r bl3}
+#Reading case closed files
+pw_case_flag <- read.csv("pw_case_flag_05_apr.csv", stringsAsFactors = FALSE, header = TRUE,
+                         na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+#Select profiles whose cases are closed 
+pw_closed <- sqldf("select distinct(pw_profile_id) from pw_case_flag where pw_case_flag_closed = 1")
+
+#Removing closed profiles from block3
+block3_1 <- sqldf("select * from block3 where pw_profile_id not in pw_closed")
+
+#Removing user ids less than 10
+block3_1 <- block3_1[(which(block3_1$user_id > 10)),]
+agg_user <- block3_1 %>% group_by(user_id) %>% tally()
+
+usr_lines <- ggplot(agg_user, aes(x = user_id, y = n)) + 
+                 geom_line() + xlab("User Id") + ylab("Number of Records")
+
+ggplotly(usr_lines)
+```
+```{r bl4}
+#Aggregate number of records by each user
+usr_points <- ggplot(agg_user, aes(x = user_id, y = n)) + 
+                  geom_point() + xlab("User Id") + ylab("Number of Records")
+
+ggplotly(usr_points)
+```
+```{r bl5}
+block3_1$anm_visit_detail_form_fill_date <- as.Date(block3_1$anm_visit_detail_form_fill_time)
+
+#Form filling trend by each user
+agg_user_date <- block3_1 %>% group_by(user_id, anm_visit_detail_form_fill_date) %>% tally()
+
+agg_user_date <- agg_user_date[!is.na(agg_user_date$anm_visit_detail_form_fill_date),]
+
+usrid <- sort(unique(na.omit(agg_user_date$user_id)))
+
+#Show form filling trend for each of the users
+for(i in seq_len(length(usrid))){
+  plot <- ggplot(agg_user_date, aes(x = anm_visit_detail_form_fill_date, y = n)) +
+    geom_point() + xlab("Date") + ylab("Number of records") +
+    ggtitle(paste("User id", as.character(usrid[i]))) +
+    facet_wrap_paginate(~user_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+  #print(ggplotly(plot))
+  print(plot)
+}
+```
+```{r bl 6}
+#Aggregate values by each subcenter
+agg_subcent <- block3_1 %>% group_by(subcenter_id) 
+
+agg_subcent_pw <- agg_subcent %>% group_by(pw_profile_id) 
+
+pw_profiles <- sort(unique(na.omit(agg_subcent_pw$pw_profile_id)))
+
+subcent <- sort(unique(na.omit(agg_subcent$subcenter_id)))
+
+#Show systolic bp values in each of the subcenters
+#for(i in seq_len(length(pw_profiles))){
+for(i in seq_len(1:10)){
+  plot <- ggplot(agg_subcent_pw, aes(x = anm_visit_detail_anc_count, y = anm_visit_detail_bp_sys)) +
+    geom_point() + xlab("ANM visit number") + ylab("Blood Pressure Systolic") +
+    ggtitle(paste("PW Profile", as.character(pw_profiles[i])))
+    #facet_wrap_paginate(~pw_profile_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+  print(plot)
+}
+
+ggplot(agg_subcent_pw[agg_subcent_pw$pw_profile_id == 6808,], aes(x = anm_visit_detail_anc_count, y = anm_visit_detail_bp_sys)) +
+  geom_point() + xlab("ANM visit number") + ylab("Blood Pressure Systolic")
+
+```
+```{r bl7}
+#Show diastolic bp values in each of the subcenters
+for(i in seq_len(length(subcent))){
+plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_bp_dia))         + geom_point() + xlab("Pw Profile Id") + ylab("Blood Pressure Diastolic") +
+        ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+        facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+print(plot)
+}
+```
+```{r bl8}
+#Show pulse values in each of the subcenters
+ for(i in seq_len(length(subcent))){
+   plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_pulse)) +
+     geom_point() + xlab("Pw Profile Id") + ylab("Pulse rate") +
+     ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+     facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+  print(plot)
+}
+```
+```{r bl9}
+#Show weight values in each of the subcenters
+ for(i in seq_len(length(subcent))){
+   plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_weight)) +
+     geom_point() + xlab("Pw Profile Id") + ylab("Weight") +
+     ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+     facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+   print(plot)
+ }
+```
+```{r bl10}
+#Show height values in each of the subcenters
+ for(i in seq_len(length(subcent))){
+   plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_height)) +
+     geom_point() + xlab("Pw Profile Id") + ylab("Height") +
+     ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+     facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+   print(plot)
+ }
+```
+```{r bl11}
+#Show bmi values in each of the subcenters
+for(i in seq_len(length(subcent))){
+   plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_bmi)) +
+     geom_point() + xlab("Pw Profile Id") + ylab("BMI") +
+     ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+     facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+   print(plot)
+}
+```
+```{r bl12}
+#Show temperature values in each of the subcenters
+for(i in seq_len(length(subcent))){
+   plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_temp)) +
+     geom_point() + xlab("Pw Profile Id") + ylab("Temperature") +
+     ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+     facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+ print(plot)
+}
+```
+```{r bl13}
+#Show Haemoglobin count values in each of the subcenters
+ for(i in seq_len(length(subcent))){
+   plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_hb)) +
+     geom_point() + xlab("Pw Profile Id") + ylab("Hb count")  +
+     ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+     facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+   print(plot)
+}
+```
+```{r bl14}
+#Show Fetal bpm values in each of the subcenters
+for(i in seq_len(length(subcent))){
+   plot <- ggplot(agg_subcent, aes(x = pw_profile_id, y = anm_visit_detail_fetal_bpm)) +
+     geom_point() + xlab("Pw Profile Id") + ylab("Fetal bpm") +
+     ggtitle(paste("Subcenter", as.character(subcent[i]))) +
+     facet_wrap_paginate(~subcenter_id,nrow = 1, ncol = 1, scales = "fixed", page = i)
+   print(plot)
+}
+
+```
+```{r bl15}
+#-----Center wise records gainst target number of records------------------
+target_anc <- read.csv("Deola_block3_target.csv", skip = 1, header = TRUE, stringsAsFactors = FALSE, 
+                       na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+subcenter_details <- read.csv("subcenter.csv", header = TRUE, stringsAsFactors = FALSE, 
+                              na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+target_anc1 <- target_anc %>% left_join(subcenter_details, by = c("Sub.Center.Name"="subcenter_name"))
+
+total_subcent <- agg_subcent %>% tally()
+
+total_subcent1 <- merge(total_subcent, target_anc1, by = "subcenter_id", all.x = TRUE)
+
+ggplot(total_subcent1, aes(x = subcenter_id, y = n)) +
+  geom_bar(stat = "identity") + xlab("Subcenter Id") + ylab("Number of Records") +
+  ggtitle("Subcenter-wise record collection") +
+  geom_line(aes(y = Expected.ANCs.in.a.year))
+
+total_subcent2 <- total_subcent1 %>% gather(key = record, value = count, n, Expected.ANCs.in.a.year)
+  
+ggplot(total_subcent2, aes(x = subcenter_id, y = count, fill = record)) +
+  geom_bar(stat = "identity", position = "dodge") + xlab("Subcenter Id") + ylab("Number of Records") +
+  ggtitle("Subcenter-wise record collection") 
+
+```
+```{r bl16}
+#--------------Fetal bpm values-----------------------
+fhr <- read.csv("fhr_limits.csv",header = TRUE, stringsAsFactors = FALSE, 
+                na.strings=c("NULL","NULL "," NULL ","NA"," ","", "-1"))
+
+agg_subcent_pw$anm_visit_detail_preg_month <- as.numeric(agg_subcent_pw$anm_visit_detail_preg_month)
+
+agg_subcent_pw1 <- merge(agg_subcent_pw, fhr, by.x = "anm_visit_detail_preg_month", by.y = "month", all.x = TRUE) %>%
+                     group_by(pw_profile_id) %>% arrange(pw_profile_id, anm_visit_detail_preg_month)
+
+agg_subcent_pw2 <- agg_subcent_pw1 %>% gather(key = record, value = count, bpm_low, bpm_high)
+
+
+ggplot(agg_subcent_pw2[agg_subcent_pw2$pw_profile_id == 6084,], aes(x = anm_visit_detail_preg_month, y = anm_visit_detail_fetal_bpm)) +
+  geom_point(na.rm = TRUE) + xlab("Pregnancy month") + ylab("Fetal Heart Rate") +
+  geom_line(aes(y = count, colour = record)) +
+  ggtitle("Fetal Heart Rate for PW Profile 6084") 
+```
